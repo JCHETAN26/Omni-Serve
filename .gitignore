@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Environments
+venv/
+.venv/
+.env
+
+# Model artifacts & datasets (tracked out of band, not in git)
+training/adapters/*
+!training/adapters/.gitkeep
+data/generated/
+*.safetensors
+*.gguf
+*.jsonl
+
+# Benchmarks & traces
+benchmarks/results/
+*.log
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
