@@ -4,10 +4,17 @@ The same script measures every configuration in the project — point it at a vL
 server running the untuned base model for the baseline, at the fine-tuned adapter
 later, or at the OmniServe gateway itself.
 
-    # baseline: untuned base model served by vLLM
+    # baseline: untuned base model, given the schema so it has a fair shot
     vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8001
     python -m benchmarks.eval_accuracy --endpoint http://localhost:8001/v1 \\
-        --model meta-llama/Llama-3.1-8B-Instruct --tag baseline
+        --model meta-llama/Llama-3.1-8B-Instruct --tag baseline --include-schema
+
+    # fine-tuned: schema omitted, matching how it was trained
+    python -m benchmarks.eval_accuracy --model omniserve-slm-8b --tag tuned
+
+Prompts come from `gateway.prompt` so that training, evaluation and serving
+cannot drift apart. Pass --include-schema to match how the model was trained;
+mismatching it is the fastest way to produce a meaningless number.
 """
 
 import argparse
@@ -16,31 +23,18 @@ import json
 from pathlib import Path
 
 from benchmarks.metrics import score
-from gateway.models.schemas import Invoice
-
-EXTRACT_PROMPT = """\
-Extract the invoice below into JSON matching this schema:
-
-{schema}
-
-Return only the JSON object. No explanation, no code fences.
-
-Document:
-{document}"""
+from gateway.prompt import build_messages
 
 
-async def _predict(client, model: str, document: str, schema: str, sem, max_tokens: int) -> str:
+async def _predict(
+    client, model: str, document: str, include_schema: bool, sem, max_tokens: int
+) -> str:
     async with sem:
         for attempt in range(3):
             try:
                 response = await client.chat.completions.create(
                     model=model,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": EXTRACT_PROMPT.format(schema=schema, document=document),
-                        }
-                    ],
+                    messages=build_messages(document, include_schema),
                     temperature=0.0,
                     max_tokens=max_tokens,
                 )
@@ -61,13 +55,13 @@ async def run(args) -> dict:
         records = records[: args.limit]
 
     client = AsyncOpenAI(base_url=args.endpoint, api_key=args.api_key)
-    schema = json.dumps(Invoice.model_json_schema(), indent=2)
     sem = asyncio.Semaphore(args.concurrency)
 
-    print(f"Evaluating {args.model} on {len(records)} records...")
+    schema_note = "with schema" if args.include_schema else "no schema"
+    print(f"Evaluating {args.model} on {len(records)} records ({schema_note})...")
     predictions = await asyncio.gather(
         *(
-            _predict(client, args.model, record["text"], schema, sem, args.max_tokens)
+            _predict(client, args.model, record["text"], args.include_schema, sem, args.max_tokens)
             for record in records
         )
     )
@@ -75,6 +69,7 @@ async def run(args) -> dict:
     results = score(list(predictions), [record["target"] for record in records])
     results["tag"] = args.tag
     results["model"] = args.model
+    results["include_schema"] = args.include_schema
     return results
 
 
@@ -87,6 +82,12 @@ def main() -> None:
     parser.add_argument("--tag", default="baseline", help="Label for this run in the report.")
     parser.add_argument("--concurrency", type=int, default=16)
     parser.add_argument("--max-tokens", type=int, default=1024)
+    parser.add_argument(
+        "--include-schema",
+        action="store_true",
+        help="Put the JSON schema in the prompt. Required for the untuned baseline; "
+        "must match how the model was trained.",
+    )
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--out", type=Path, default=Path("benchmarks/results"))
     args = parser.parse_args()

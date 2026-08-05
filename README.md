@@ -19,7 +19,7 @@ Full engineering spec: [Build-plan.md](./Build-plan.md).
 | --- | --- | --- |
 | 1 | Repo layout, CI, branch protection | ✅ scaffolded |
 | 2 | Synthetic dataset + baseline eval | 🟡 pipeline built, baseline run pending GPU |
-| 3 | QLoRA fine-tuning (Unsloth) | ⬜ not started |
+| 3 | QLoRA fine-tuning (Unsloth) | 🟡 script ready, training run pending GPU |
 | 4 | vLLM engine + constrained decoding | ⬜ not started |
 | 5 | Redis semantic cache | ⬜ not started |
 | 6 | Gateway endpoints + observability | ⬜ not started |
@@ -62,15 +62,50 @@ python -m data.split_dataset          # 8500 / 1000 / 500, seeded
 The 500-record test split is frozen: baseline and fine-tuned scores are only
 comparable if both were measured on the same records.
 
-## Measuring accuracy
+## Fine-tuning
 
-`benchmarks/eval_accuracy.py` targets any OpenAI-compatible endpoint, so the
-same script scores the untuned baseline, the fine-tuned adapter, and the
-gateway itself.
+Needs a CUDA GPU. Unsloth and torch are imported lazily inside `train()`, so the
+config and data plumbing stay importable and testable without one.
 
 ```bash
+pip install -e ".[training]" && pip install unsloth
+python -m training.train_qlora --epochs 2 --output training/adapters/omniserve-slm-8b
+```
+
+Defaults follow the build plan: r=16, α=32, batch 2 × grad-accum 4 (effective 8),
+lr 2e-4, 10 warmup steps. Training scores the assistant turn only — without that
+the model spends most of its loss learning to echo the invoice it was handed.
+
+## The prompt contract
+
+`gateway/prompt.py` is the single source of truth for prompts, imported by
+training, evaluation, and serving alike. A fine-tune is only as good as the
+agreement between the prompt it trained on and the one it's served with, and
+drift between them surfaces as a bad eval rather than an error.
+
+It has two variants, and which one you use matters:
+
+- **`--include-schema`** spells out the target JSON schema. The untuned baseline
+  needs this — it has no idea what fields you want.
+- **default (no schema)** omits it. The fine-tune has internalized the schema,
+  and dropping it saves ~400 tokens of prefill per request, which is TTFT.
+
+The baseline is therefore given the *more* informative prompt, so any win the
+fine-tune shows is understated rather than inflated.
+
+## Measuring accuracy
+
+`benchmarks/eval_accuracy.py` targets any OpenAI-compatible endpoint, so one
+script scores the baseline, the tuned adapter, and the gateway.
+
+```bash
+# baseline — schema in prompt
 vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8001
-python -m benchmarks.eval_accuracy --model meta-llama/Llama-3.1-8B-Instruct --tag baseline
+python -m benchmarks.eval_accuracy --model meta-llama/Llama-3.1-8B-Instruct \
+    --tag baseline --include-schema
+
+# tuned — schema omitted, matching training
+python -m benchmarks.eval_accuracy --model omniserve-slm-8b --tag tuned
 ```
 
 Reports field-level precision/recall/F1, exact-match rate, invalid-JSON-syntax

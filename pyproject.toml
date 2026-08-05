@@ -53,7 +53,7 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["gateway*", "data*", "benchmarks*"]
+include = ["gateway*", "data*", "benchmarks*", "training*"]
 
 [tool.black]
 line-length = 100
