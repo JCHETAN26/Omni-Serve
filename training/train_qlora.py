@@ -18,6 +18,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from training.dataset import RESPONSE_MARKER, build_hf_dataset
+from training.trl_compat import (
+    filter_training_args,
+    introspect,
+    route_sft_options,
+    tokenizer_kwarg,
+)
 
 TARGET_MODULES = [
     "q_proj",
@@ -106,35 +112,58 @@ def train(config: TrainConfig) -> None:
     print(f"train={len(train_dataset)} val={len(eval_dataset)}")
     print(f"effective batch size = {config.effective_batch_size}")
 
-    trainer = SFTTrainer(
-        model=model,
-        tokenizer=tokenizer,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        dataset_text_field="text",
+    # SFTConfig is where modern TRL wants the SFT-specific options; older
+    # versions take them on the trainer with plain TrainingArguments.
+    try:
+        from trl import SFTConfig as ArgsClass
+    except ImportError:
+        ArgsClass = TrainingArguments
+
+    trainer_params, config_fields = introspect(SFTTrainer, ArgsClass)
+    config_extras, trainer_extras = route_sft_options(
+        trainer_params,
+        config_fields,
+        text_field="text",
         max_seq_length=config.max_seq_length,
         packing=False,  # packing would splice unrelated invoices into one window
-        args=TrainingArguments(
-            output_dir=str(config.output / "checkpoints"),
-            per_device_train_batch_size=config.batch_size,
-            gradient_accumulation_steps=config.grad_accum,
-            num_train_epochs=config.epochs,
-            learning_rate=config.learning_rate,
-            warmup_steps=config.warmup_steps,
-            lr_scheduler_type="linear",
-            optim="adamw_8bit",
-            weight_decay=0.01,
-            fp16=not is_bfloat16_supported(),
-            bf16=is_bfloat16_supported(),
-            logging_steps=25,
-            eval_strategy="steps",
-            eval_steps=250,
-            save_strategy="steps",
-            save_steps=500,
-            save_total_limit=2,
-            seed=config.seed,
-            report_to="none",
-        ),
+    )
+
+    requested_args = {
+        "output_dir": str(config.output / "checkpoints"),
+        "per_device_train_batch_size": config.batch_size,
+        "gradient_accumulation_steps": config.grad_accum,
+        "num_train_epochs": config.epochs,
+        "learning_rate": config.learning_rate,
+        "warmup_steps": config.warmup_steps,
+        "lr_scheduler_type": "linear",
+        "optim": "adamw_8bit",
+        "weight_decay": 0.01,
+        "fp16": not is_bfloat16_supported(),
+        "bf16": is_bfloat16_supported(),
+        "logging_steps": 25,
+        "eval_strategy": "steps",
+        "eval_steps": 250,
+        "save_strategy": "steps",
+        "save_steps": 500,
+        "save_total_limit": 2,
+        "seed": config.seed,
+        "report_to": "none",
+    }
+
+    training_args = ArgsClass(
+        **filter_training_args(requested_args, config_fields), **config_extras
+    )
+
+    tokenizer_key = tokenizer_kwarg(trainer_params)
+    print(f"trl: args={ArgsClass.__name__} tokenizer_kwarg={tokenizer_key}")
+
+    trainer = SFTTrainer(
+        model=model,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        args=training_args,
+        **({tokenizer_key: tokenizer} if tokenizer_key else {}),
+        **trainer_extras,
     )
 
     if config.completion_only:
