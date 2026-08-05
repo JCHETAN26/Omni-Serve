@@ -109,6 +109,21 @@ def run(args) -> dict:
     results["tag"] = args.tag
     results["model"] = args.adapter or args.model
     results["include_schema"] = args.include_schema
+
+    # Raw output is the only way to tell "the model is bad" from "the harness is
+    # wrong". A 0.0 F1 means nothing until you have read what it actually said.
+    args.out.mkdir(parents=True, exist_ok=True)
+    raw_path = args.out / f"predictions-{args.tag}.jsonl"
+    with raw_path.open("w") as handle:
+        for record, prediction in zip(records, predictions):
+            handle.write(
+                json.dumps(
+                    {"id": record["id"], "prediction": prediction, "target": record["target"]}
+                )
+                + "\n"
+            )
+    print(f"Raw predictions -> {raw_path}")
+
     return results
 
 

@@ -41,8 +41,11 @@ Fine-tunes a domain SLM for invoice extraction and reports before/after accuracy
 """),
     code("""
 %%capture
+# No TRL pin: Unsloth installs a compatible set, and training/trl_compat.py
+# adapts to whichever SFTTrainer signature lands. Pinning here fought Unsloth
+# and produced `Trainer.__init__() got an unexpected keyword argument 'tokenizer'`.
 !pip install -q "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
-!pip install -q --no-deps "trl<0.9.0" peft accelerate bitsandbytes
+!pip install -q --no-deps peft accelerate bitsandbytes
 """),
     code("""
 # Not captured: this is the cell most likely to fail, and a silent
@@ -87,6 +90,23 @@ improvement comes out understated rather than inflated.
     code("""
 !python -m benchmarks.eval_local --model {MODEL} --tag baseline \\
     --include-schema --batch-size {BATCH} {_limit}
+"""),
+    md("""
+### What did the baseline actually say?
+
+A near-zero F1 can mean the model is bad — or that it answered in a shape the
+scorer doesn't recognise. Read a few raw outputs before believing the number.
+Untuned models handed a schema often echo the schema back, which parses as JSON
+and validates as nothing.
+"""),
+    code("""
+import json
+
+for line in list(open("benchmarks/results/predictions-baseline.jsonl"))[:3]:
+    row = json.loads(line)
+    print(f"--- {row['id']} ---")
+    print(row["prediction"][:400])
+    print()
 """),
     md("""
 ## Train
