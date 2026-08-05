@@ -18,7 +18,7 @@ Full engineering spec: [Build-plan.md](./Build-plan.md).
 | Phase | Scope | State |
 | --- | --- | --- |
 | 1 | Repo layout, CI, branch protection | ✅ scaffolded |
-| 2 | Synthetic dataset + baseline eval | ⬜ not started |
+| 2 | Synthetic dataset + baseline eval | 🟡 pipeline built, baseline run pending GPU |
 | 3 | QLoRA fine-tuning (Unsloth) | ⬜ not started |
 | 4 | vLLM engine + constrained decoding | ⬜ not started |
 | 5 | Redis semantic cache | ⬜ not started |
@@ -39,8 +39,42 @@ curl localhost:8000/health
 ```
 
 Optional dependency groups keep heavy stacks out of the default install:
-`.[cache]` (Redis + embeddings), `.[engine]` (vLLM + Outlines), `.[training]`
-(PyTorch + PEFT), `.[observability]` (OpenTelemetry + Prometheus).
+`.[data]` (OpenAI client), `.[cache]` (Redis + embeddings), `.[engine]` (vLLM +
+Outlines), `.[training]` (PyTorch + PEFT), `.[observability]` (OpenTelemetry +
+Prometheus).
+
+## Building the dataset
+
+Ground-truth invoices are generated programmatically, then rendered into
+unstructured text. Labels are correct by construction — the LLM only writes
+prose, it never authors the JSON it would then be graded against.
+
+```bash
+# free and deterministic: template renderers, no API key, ~1s for 10k
+python -m data.generate_dataset --count 10000 --offline --noise 0.01
+
+# richer text via GPT-4o (costs money; renders text only, not labels)
+OPENAI_API_KEY=... python -m data.generate_dataset --count 10000
+
+python -m data.split_dataset          # 8500 / 1000 / 500, seeded
+```
+
+The 500-record test split is frozen: baseline and fine-tuned scores are only
+comparable if both were measured on the same records.
+
+## Measuring accuracy
+
+`benchmarks/eval_accuracy.py` targets any OpenAI-compatible endpoint, so the
+same script scores the untuned baseline, the fine-tuned adapter, and the
+gateway itself.
+
+```bash
+vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8001
+python -m benchmarks.eval_accuracy --model meta-llama/Llama-3.1-8B-Instruct --tag baseline
+```
+
+Reports field-level precision/recall/F1, exact-match rate, invalid-JSON-syntax
+rate, and schema-validity rate to `benchmarks/results/`.
 
 ## Layout
 
