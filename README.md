@@ -21,7 +21,7 @@ Full engineering spec: [Build-plan.md](./Build-plan.md).
 | 2 | Synthetic dataset + baseline eval | 🟡 pipeline built, baseline run pending GPU |
 | 3 | QLoRA fine-tuning (Unsloth) | 🟡 script ready, training run pending GPU |
 | 4 | vLLM engine + constrained decoding | ⬜ not started |
-| 5 | Redis semantic cache | ⬜ not started |
+| 5 | Redis semantic cache | ✅ built and tested |
 | 6 | Gateway endpoints + observability | ⬜ not started |
 | 7 | Benchmarks (accuracy, TTFT, throughput) | ⬜ not started |
 
@@ -39,9 +39,9 @@ curl localhost:8000/health
 ```
 
 Optional dependency groups keep heavy stacks out of the default install:
-`.[data]` (OpenAI client), `.[cache]` (Redis + embeddings), `.[engine]` (vLLM +
-Outlines), `.[training]` (PyTorch + PEFT), `.[observability]` (OpenTelemetry +
-Prometheus).
+`.[data]` (OpenAI client), `.[cache]` (Redis + redisvl), `.[embeddings]`
+(sentence-transformers), `.[engine]` (vLLM + Outlines), `.[training]` (PyTorch +
+PEFT), `.[observability]` (OpenTelemetry + Prometheus).
 
 ## Building the dataset
 
@@ -75,6 +75,40 @@ python -m training.train_qlora --epochs 2 --output training/adapters/omniserve-s
 Defaults follow the build plan: r=16, α=32, batch 2 × grad-accum 4 (effective 8),
 lr 2e-4, 10 warmup steps. Training scores the assistant turn only — without that
 the model spends most of its loss learning to echo the invoice it was handed.
+
+## Caching
+
+Two tiers, because similarity alone is unsafe for extraction.
+
+**Tier 1 — exact.** SHA-256 of the normalized document. Always correct, and it
+catches the hit pattern that dominates in practice: retries, duplicate
+submissions, batch reprocessing.
+
+**Tier 2 — semantic.** Vector search gated on *both* a cosine threshold and
+agreement on every number in the document. That second condition is not
+optional. Measured with all-MiniLM-L6-v2:
+
+| Pair | Cosine | Above 0.95? |
+| --- | --- | --- |
+| Same template, different amounts — **different invoices** | 0.9673 | yes |
+| Same vendor, different qty + amounts — **different invoices** | 0.9716 | yes |
+| Same document, reflowed and uppercased — **real duplicate** | 1.0 | yes |
+
+Similarity cannot tell the first two from the third, so a threshold-only cache
+returns one invoice's totals for another and writes a wrong number to your
+database with no error raised. The numeric fingerprint separates them.
+
+```python
+cache = SemanticCache(redis_url="redis://localhost:6379", threshold=0.95)
+await cache.connect()
+hit = await cache.get(document)          # CacheHit(value, tier, similarity) | None
+await cache.set(document, extracted)
+```
+
+`SemanticCache(require_numeric_match=False)` restores the naive behaviour, and
+`tests/integration/test_cache_redis.py` has a test proving it serves wrong data.
+The default embedder is `HashEmbedder` (no torch); install `.[embeddings]` and
+pass `SentenceTransformerEmbedder()` for real similarity.
 
 ## The prompt contract
 

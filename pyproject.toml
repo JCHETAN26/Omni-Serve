@@ -21,9 +21,14 @@ dependencies = [
 data = [
     "openai>=1.40",
 ]
+# Split deliberately: `cache` is what the gateway needs to run, and stays light
+# enough for CI. `embeddings` pulls torch, and is only needed for real semantic
+# similarity — the cache falls back to HashEmbedder without it.
 cache = [
     "redis>=5.0",
     "redisvl>=0.3",
+]
+embeddings = [
     "sentence-transformers>=3.0",
 ]
 engine = [

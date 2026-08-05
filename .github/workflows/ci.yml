@@ -51,13 +51,15 @@ jobs:
           --health-retries 5
     env:
       REDIS_URL: redis://localhost:6379
+      # Turns "Redis unreachable" from a silent skip into a failure. Without it
+      # a broken service would leave this job green having tested nothing.
+      REQUIRE_REDIS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -e ".[dev]"
-      # Exit code 5 == "no tests collected"; expected until Phase 5/6 land.
+      - run: pip install -e ".[dev,cache]"
       - name: Run integration tests
-        run: pytest tests/integration -v || [ $? -eq 5 ]
+        run: pytest tests/integration -v
