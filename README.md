@@ -67,10 +67,20 @@ comparable if both were measured on the same records.
 Needs a CUDA GPU. Unsloth and torch are imported lazily inside `train()`, so the
 config and data plumbing stay importable and testable without one.
 
+**On Colab:** open [`training/colab_finetune.ipynb`](training/colab_finetune.ipynb)
+— it installs, builds the dataset, measures the untuned baseline, trains, scores
+the tuned model on the same records, and saves the adapter to Drive.
+
+**Locally:**
+
 ```bash
 pip install -e ".[training]" && pip install unsloth
-python -m training.train_qlora --epochs 2 --output training/adapters/omniserve-slm-8b
+python -m training.train_qlora --max-seq-length 1024 --epochs 2 \
+    --output training/adapters/omniserve-slm-8b
 ```
+
+Pass `--max-seq-length 1024`: the longest example in this dataset is ~640 tokens,
+and the 4096 default will OOM an 8B on a 16GB T4 for no benefit.
 
 Defaults follow the build plan: r=16, α=32, batch 2 × grad-accum 4 (effective 8),
 lr 2e-4, 10 warmup steps. Training scores the assistant turn only — without that
@@ -167,6 +177,10 @@ python -m benchmarks.eval_accuracy --model meta-llama/Llama-3.1-8B-Instruct \
 # tuned — schema omitted, matching training
 python -m benchmarks.eval_accuracy --model omniserve-slm-8b --tag tuned
 ```
+
+`eval_local.py` is the same evaluation without a server — it loads the model
+in-process, for notebooks and single-GPU boxes where vLLM can't run alongside
+training. Identical prompts and scoring, so the numbers are comparable.
 
 Reports field-level precision/recall/F1, exact-match rate, invalid-JSON-syntax
 rate, and schema-validity rate to `benchmarks/results/`.
