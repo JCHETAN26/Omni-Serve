@@ -24,8 +24,13 @@ SUB $422.88
 TAX $0.00
 TOT $422.88 (USD)"""
 
-# Byte-different, semantically identical: the case the cache should serve.
+# Byte-different but identical once normalized — tier 1 catches this, not tier 2.
 INVOICE_A_REFLOWED = INVOICE_A.replace("\n", "  \n ").upper()
+
+# Genuinely distinct after normalization, so the exact tier misses, but the same
+# document: same numbers, nearly all tokens shared. This is the only shape that
+# actually reaches tier 2, and every semantic-tier test below must use it.
+INVOICE_A_ANNOTATED = INVOICE_A + "\nPLEASE REMIT PROMPTLY"
 
 # Different invoice, same template: the case that must never be served.
 INVOICE_B = INVOICE_A.replace("17.62", "21.40").replace("422.88", "513.60")
@@ -73,22 +78,41 @@ async def test_exact_tier_ignores_whitespace_and_case(cache):
     assert hit.tier == "exact"
 
 
-async def test_semantic_tier_serves_a_reformatted_duplicate(cache):
+async def test_reflowed_duplicate_is_caught_by_the_cheap_tier(cache):
+    """Whitespace/case changes never reach tier 2 — normalization absorbs them."""
     await cache.set(INVOICE_A, RESULT_A)
     hit = await cache.get(INVOICE_A_REFLOWED)
 
     assert hit is not None
+    assert hit.tier == "exact"
+
+
+async def test_semantic_tier_serves_an_annotated_duplicate(cache):
+    """The real tier-2 path: exact key differs, embedding and numbers agree."""
+    await cache.set(INVOICE_A, RESULT_A)
+    hit = await cache.get(INVOICE_A_ANNOTATED)
+
+    assert hit is not None
+    assert hit.tier == "semantic"
     assert hit.value == RESULT_A
     assert hit.similarity >= cache.threshold
+    assert cache.stats["semantic_hits"] == 1
 
 
-async def test_guard_refuses_a_different_invoice_on_the_same_template(cache):
-    """The data-corruption case. A hit here would write 422.88 in place of 513.60."""
+async def test_guard_refuses_a_different_invoice_that_clears_the_threshold(cache):
+    """The data-corruption case: a hit here writes 422.88 in place of 513.60.
+
+    The threshold is lowered so the pair clears it — otherwise similarity alone
+    rejects them and the guard is never exercised, which is exactly how the
+    first version of this test passed without proving anything.
+    """
+    cache.threshold = 0.5
     await cache.set(INVOICE_A, RESULT_A)
+
     hit = await cache.get(INVOICE_B)
 
     assert hit is None
-    assert cache.stats["guard_rejections"] >= 1
+    assert cache.stats["guard_rejections"] == 1
 
 
 async def test_disabling_the_guard_reintroduces_the_bug(cache):
@@ -116,7 +140,7 @@ async def test_semantic_tier_can_be_switched_off(cache):
     await cache.set(INVOICE_A, RESULT_A)
 
     assert (await cache.get(INVOICE_A)).tier == "exact"
-    assert await cache.get(INVOICE_A_REFLOWED) is None
+    assert await cache.get(INVOICE_A_ANNOTATED) is None  # would be a tier-2 hit
 
 
 async def test_clear_empties_both_tiers(cache):
