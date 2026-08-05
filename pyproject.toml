@@ -18,6 +18,9 @@ dependencies = [
 # Heavy, platform-specific stacks stay optional so CI and laptops can install
 # the gateway without pulling CUDA wheels.
 [project.optional-dependencies]
+data = [
+    "openai>=1.40",
+]
 cache = [
     "redis>=5.0",
     "redisvl>=0.3",
@@ -50,7 +53,7 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["gateway*"]
+include = ["gateway*", "data*", "benchmarks*"]
 
 [tool.black]
 line-length = 100
