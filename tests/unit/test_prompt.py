@@ -49,6 +49,21 @@ def test_completion_is_compact_and_stable():
     assert build_completion(shuffled) == completion
 
 
+def test_completion_key_order_matches_the_schema_grammar():
+    """Training order must equal the order Outlines will mask against.
+
+    Outlines compiles its grammar from the schema's property order, so a model
+    trained on any other order fights the mask on every key token at serve time.
+    """
+    from gateway.models.schemas import Invoice
+
+    completion_keys = list(json.loads(build_completion(TARGET)))
+    schema_keys = list(Invoice.model_json_schema()["properties"])
+
+    assert completion_keys == schema_keys
+    assert completion_keys != sorted(completion_keys)  # the bug this replaced
+
+
 def test_conversation_ends_with_the_gold_answer():
     conversation = to_conversation({"text": DOCUMENT, "target": TARGET})
 

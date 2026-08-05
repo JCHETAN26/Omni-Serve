@@ -20,7 +20,7 @@ Full engineering spec: [Build-plan.md](./Build-plan.md).
 | 1 | Repo layout, CI, branch protection | ✅ scaffolded |
 | 2 | Synthetic dataset + baseline eval | 🟡 pipeline built, baseline run pending GPU |
 | 3 | QLoRA fine-tuning (Unsloth) | 🟡 script ready, training run pending GPU |
-| 4 | vLLM engine + constrained decoding | ⬜ not started |
+| 4 | vLLM engine + constrained decoding | 🟡 built, needs CUDA to run |
 | 5 | Redis semantic cache | ✅ built and tested |
 | 6 | Gateway endpoints + observability | ⬜ not started |
 | 7 | Benchmarks (accuracy, TTFT, throughput) | ⬜ not started |
@@ -75,6 +75,32 @@ python -m training.train_qlora --epochs 2 --output training/adapters/omniserve-s
 Defaults follow the build plan: r=16, α=32, batch 2 × grad-accum 4 (effective 8),
 lr 2e-4, 10 warmup steps. Training scores the assistant turn only — without that
 the model spends most of its loss learning to echo the invoice it was handed.
+
+## Serving
+
+The gateway depends on the `ExtractionEngine` protocol, never on vLLM directly,
+so two backends satisfy it:
+
+- **`VLLMEngine`** — AsyncLLMEngine, PagedAttention, continuous batching, LoRA
+  adapter loading, and grammar-constrained decoding. Needs CUDA. vLLM is
+  imported inside `start()`, so the module imports fine without a GPU.
+- **`MockEngine`** — no GPU, satisfies the same protocol, streams in chunks with
+  configurable TTFT. Used by the tests, and by Phase 7 as a no-model baseline.
+
+### What constrained decoding does and doesn't buy
+
+Outlines compiles a grammar from the `Invoice` schema and masks logits during
+decode, so syntactically invalid JSON becomes unrepresentable rather than
+unlikely. Schema validity rate goes to 100%.
+
+It does **not** make the output correct. The model can still emit a well-formed
+wrong total. Constrained decoding fixes the *invalid JSON syntax rate*; field F1
+is what the fine-tune is for. Reporting them as one number would overstate both.
+
+Because the grammar masks properties in the schema's declaration order,
+`build_completion` serializes training targets in that same order. A model
+trained on sorted keys would fight the mask on every key token — see
+`test_completion_key_order_matches_the_schema_grammar`.
 
 ## Caching
 

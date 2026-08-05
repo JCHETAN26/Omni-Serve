@@ -10,6 +10,7 @@ import json
 import pytest
 
 from data.generate_dataset import generate_offline
+from gateway.prompt import build_completion
 from training.dataset import format_records, load_jsonl, to_conversation
 from training.train_qlora import TARGET_MODULES, TrainConfig, build_config
 
@@ -82,8 +83,10 @@ def test_formatted_text_contains_the_target_json():
     records = generate_offline(3, seed=1, noise=0.0)
     texts = format_records(records, fake_chat_template)
 
+    # Via build_completion, not a hand-rolled dumps: the serialization is part
+    # of the prompt contract, and duplicating it here is how the two drift.
     for text, record in zip(texts, records):
-        assert json.dumps(record["target"], separators=(",", ":"), sort_keys=True) in text
+        assert build_completion(record["target"]) in text
 
 
 def test_response_marker_is_present_for_completion_masking():

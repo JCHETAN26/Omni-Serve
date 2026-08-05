@@ -65,8 +65,14 @@ def build_messages(document: str, include_schema: bool = False) -> list[dict[str
 def build_completion(target: dict) -> str:
     """The exact assistant turn the model is trained to produce.
 
-    Compact separators, stable key order: every token the model spends on
-    whitespace is a token it isn't spending on being right, and inconsistent
-    key order would make it learn ordering noise instead of extraction.
+    Serialized through the Pydantic model rather than `json.dumps`, which fixes
+    the key order to the schema's declaration order — `vendor` first, not
+    `currency`. That is not cosmetic: Outlines derives its grammar from the same
+    schema and masks logits in property order, so a model trained on sorted keys
+    would fight the mask on every key token at serve time. Wrong order costs
+    quality and decode speed, and shows up only as a bad post-training eval.
+
+    Pydantic also emits compact separators — whitespace tokens are tokens not
+    spent being right.
     """
-    return json.dumps(target, separators=(",", ":"), sort_keys=True)
+    return Invoice.model_validate(target).model_dump_json()
