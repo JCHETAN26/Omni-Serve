@@ -1,6 +1,6 @@
 import json
 
-from benchmarks.metrics import flatten, normalize, parse_prediction, score
+from benchmarks.metrics import diagnose, flatten, normalize, parse_prediction, score
 
 TARGET = {
     "vendor": "Acme Supply Co.",
@@ -81,3 +81,26 @@ def test_score_penalizes_hallucinated_extra_line_items():
 
     assert results["field_precision"] < 1.0
     assert results["field_recall"] == 1.0
+
+
+def test_diagnose_flags_zero_f1_with_parseable_output():
+    """The exact pattern the first baseline run produced."""
+    warning = diagnose({"field_f1": 0.0, "json_parse_rate": 0.73, "schema_validity_rate": 0.0})
+
+    assert warning is not None
+    assert "predictions" in warning
+
+
+def test_diagnose_flags_valid_json_that_is_never_an_invoice():
+    warning = diagnose({"field_f1": 0.2, "json_parse_rate": 0.9, "schema_validity_rate": 0.0})
+
+    assert warning is not None
+
+
+def test_diagnose_stays_quiet_on_a_plausibly_weak_model():
+    assert diagnose({"field_f1": 0.31, "json_parse_rate": 0.8, "schema_validity_rate": 0.7}) is None
+
+
+def test_diagnose_stays_quiet_when_nothing_parsed():
+    """Zero F1 with zero parsing is a real failure, not a harness bug."""
+    assert diagnose({"field_f1": 0.0, "json_parse_rate": 0.0, "schema_validity_rate": 0.0}) is None

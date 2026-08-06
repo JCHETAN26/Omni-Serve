@@ -89,6 +89,32 @@ def parse_prediction(raw: str) -> tuple[dict | None, bool, bool]:
     return record, True, True
 
 
+def diagnose(results: dict) -> str | None:
+    """Flag metric patterns that indicate a broken harness, not a weak model.
+
+    Aggregate numbers hide the difference between "the model is bad" and "the
+    model answered in a shape we never scored". These two patterns cost a full
+    GPU eval run to discover the first time.
+    """
+    f1 = results.get("field_f1", 0.0)
+    parse_rate = results.get("json_parse_rate", 0.0)
+    schema_rate = results.get("schema_validity_rate", 0.0)
+
+    if f1 == 0.0 and parse_rate > 0.5:
+        return (
+            f"field_f1 is 0.0 but {parse_rate:.0%} of outputs parsed as JSON. A weak model "
+            "still gets some fields right, so this usually means the model answered in an "
+            "unexpected shape — echoing the prompt's field list is the common one. Read "
+            "predictions-*.jsonl before trusting this number."
+        )
+    if parse_rate > 0.5 and schema_rate == 0.0:
+        return (
+            f"{parse_rate:.0%} of outputs are valid JSON but none validate as an Invoice. "
+            "Likely a different object shape entirely. Check predictions-*.jsonl."
+        )
+    return None
+
+
 def score(predictions: list[str], targets: list[dict]) -> dict[str, float]:
     """Aggregate field F1, exact-match, and JSON health over a test split."""
     if len(predictions) != len(targets):

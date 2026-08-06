@@ -22,7 +22,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from benchmarks.metrics import score
+from benchmarks.metrics import diagnose, score
 from gateway.prompt import build_messages
 
 
@@ -102,6 +102,10 @@ def main() -> None:
     for key, value in results.items():
         print(f"  {key:>26}: {value}")
     print(f"\nWrote {path}")
+
+    warning = diagnose(results)
+    if warning:
+        print(f"\nWARNING: {warning}")
 
 
 if __name__ == "__main__":
