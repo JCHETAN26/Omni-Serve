@@ -106,7 +106,7 @@ def test_schema_flag_threads_through_to_the_prompt():
     with_schema = format_records(records, fake_chat_template, include_schema=True)[0]
 
     assert len(with_schema) > len(plain)
-    assert "properties" in with_schema
+    assert "line_items" in with_schema  # compact field spec, not raw JSON Schema
 
 
 def test_load_jsonl_roundtrip(tmp_path):

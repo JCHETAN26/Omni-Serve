@@ -1,6 +1,6 @@
 import json
 
-from gateway.prompt import build_completion, build_messages, schema_text
+from gateway.prompt import build_completion, build_messages, example_text, field_spec
 from training.dataset import to_conversation
 
 DOCUMENT = "*** ACME SUPPLY CO. ***\nRef INV-2024-0117\nTOT $40.59"
@@ -32,11 +32,33 @@ def test_schema_variant_is_strictly_longer():
     assert len(with_schema) > len(without)
 
 
-def test_schema_text_reflects_the_pydantic_model():
-    schema = json.loads(schema_text())
+def test_field_spec_lists_every_model_field():
+    from gateway.models.schemas import Invoice
 
-    assert "Invoice" in schema.get("title", "") or "properties" in schema
-    assert set(schema["properties"]) >= {"vendor", "total", "line_items"}
+    spec = field_spec()
+
+    for name in Invoice.model_fields:
+        assert name in spec
+    assert "YYYY-MM-DD" in spec  # date format is spelled out, not inferred
+
+
+def test_schema_variant_carries_a_worked_example():
+    """The example is the fix for schema echo — assert it is actually there."""
+    content = build_messages(DOCUMENT, include_schema=True)[1]["content"]
+    example = json.loads(example_text())
+
+    assert example_text() in content
+    assert example["vendor"] == "Example Trading Co."
+    assert "Do not repeat these" in content
+
+
+def test_baseline_prompt_stays_far_cheaper_than_the_raw_schema():
+    """Raw model_json_schema() was ~1700 chars and got echoed back verbatim."""
+    from gateway.models.schemas import Invoice
+
+    raw_schema = json.dumps(Invoice.model_json_schema())
+
+    assert len(field_spec()) + len(example_text()) < len(raw_schema)
 
 
 def test_completion_is_compact_and_stable():
