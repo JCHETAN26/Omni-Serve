@@ -93,6 +93,7 @@ def create_app(settings: dict | None = None, service: ExtractionService | None =
             version=__version__,
             model_ready=model_ready,
             cache_ready=cache is not None,
+            engine=type(engine).__name__ if engine is not None else None,
         )
 
     @app.get("/metrics", response_class=PlainTextResponse)

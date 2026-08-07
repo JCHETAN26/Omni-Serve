@@ -49,3 +49,6 @@ class HealthResponse(BaseModel):
     version: str
     model_ready: bool
     cache_ready: bool
+    # Which backend is actually serving. Reported so a benchmark run can stamp
+    # its own provenance and never present MockEngine numbers as GPU numbers.
+    engine: str | None = None
