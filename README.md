@@ -23,7 +23,7 @@ Full engineering spec: [Build-plan.md](./Build-plan.md).
 | 4 | vLLM engine + constrained decoding | 🟡 built, needs CUDA to run |
 | 5 | Redis semantic cache | ✅ built and tested |
 | 6 | Gateway endpoints + observability | ✅ built and tested |
-| 7 | Benchmarks (accuracy, TTFT, throughput) | ⬜ not started |
+| 7 | Benchmarks (accuracy, TTFT, throughput) | ✅ built and tested |
 
 Today the gateway exposes `/health` only; `/v1/extract` and `/metrics` arrive in Phase 6.
 
@@ -222,6 +222,33 @@ benchmarks/       Locust load tests + eval metrics  (Phase 7)
 docker/           Dockerfile and compose setup
 tests/            unit/ and integration/ suites
 ```
+
+## Load testing
+
+```bash
+uvicorn gateway.main:app --port 8000 &
+python -m benchmarks.run_loadtest --users 10 25 50 --duration 60s \
+    --duplicate-ratio 0.3 --tag baseline --gateway-pid $!
+```
+
+Reports RPS, p50/p95/p99 latency, TTFT (measured on the SSE path only — a
+non-streaming request has no observable first token), and peak RSS.
+
+Three things the report always records, because they decide whether the numbers
+mean anything:
+
+- **Which engine served it.** `/health` reports the backend, and a run against
+  `MockEngine` is stamped with a warning. Mock numbers measure gateway, cache
+  and network overhead — nothing about model throughput.
+- **Whether the cache was attached.**
+- **The duplicate ratio.** Cache hit rate is a direct function of how often the
+  workload repeats a document, so `--duplicate-ratio` is required rather than
+  defaulted. A benchmark that quietly picks a flattering value is measuring its
+  own assumptions.
+
+`build_requests` refuses a corpus too small to honour the requested ratio.
+Wrapping the document cycle would silently turn a requested 0.3 into 0.975 and
+inflate the headline number.
 
 ## Contributing
 
