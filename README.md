@@ -22,7 +22,7 @@ Full engineering spec: [Build-plan.md](./Build-plan.md).
 | 3 | QLoRA fine-tuning (Unsloth) | 🟡 script ready, training run pending GPU |
 | 4 | vLLM engine + constrained decoding | 🟡 built, needs CUDA to run |
 | 5 | Redis semantic cache | ✅ built and tested |
-| 6 | Gateway endpoints + observability | ⬜ not started |
+| 6 | Gateway endpoints + observability | ✅ built and tested |
 | 7 | Benchmarks (accuracy, TTFT, throughput) | ⬜ not started |
 
 Today the gateway exposes `/health` only; `/v1/extract` and `/metrics` arrive in Phase 6.
@@ -85,6 +85,30 @@ and the 4096 default will OOM an 8B on a 16GB T4 for no benefit.
 Defaults follow the build plan: r=16, α=32, batch 2 × grad-accum 4 (effective 8),
 lr 2e-4, 10 warmup steps. Training scores the assistant turn only — without that
 the model spends most of its loss learning to echo the invoice it was handed.
+
+## The API
+
+```bash
+uvicorn gateway.main:app                      # MockEngine, no GPU needed
+python -m gateway.main --model-path ./training/adapters/omniserve-slm-8b \
+    --redis-url redis://localhost:6379        # vLLM + cache
+```
+
+| Endpoint | Behaviour |
+| --- | --- |
+| `POST /v1/extract` | Cache lookup, then engine on a miss. `stream: true` returns SSE. |
+| `GET /health` | Engine and cache readiness. |
+| `GET /metrics` | Prometheus text: request counts, cache hits by tier, TTFT and duration histograms. |
+
+Three behaviours worth knowing:
+
+- **A cache hit never reaches the engine.** That's the point of Phase 5, so it's
+  asserted directly rather than inferred from timing.
+- **Invalid model output is a 502, and is never cached.** The gateway worked;
+  its upstream produced garbage. Caching it would promote one bad generation
+  into a permanently served wrong answer.
+- **A stream always terminates** with exactly one `done` or `error` event. A
+  stream that simply stops is indistinguishable from a hung connection.
 
 ## Serving
 
